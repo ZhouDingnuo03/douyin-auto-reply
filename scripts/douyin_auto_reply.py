@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 抖音自动刷视频+评论回复机器人
+GitHub: https://github.com/ZhouDingnuo03/douyin-auto-reply
 """
 import asyncio
 import random
@@ -20,8 +21,8 @@ class DouyinAutoReplyBot:
         self.risk_controller = RiskController(self.config)
         self.reply_count = 0
         self.start_time = time.time
-        # 保存所有视频ID列表，按顺序处理
-        self.video_ids = []
+        # 保存所有视频列表，包含ID和标题，按顺序处理
+        self.videos = []  # 每个元素 {id: string, title: string}
         self.current_video_index = 0
 
         # 由于连接到已有的Chrome浏览器实例，浏览器已经保存了登录Cookie
@@ -65,72 +66,122 @@ class DouyinAutoReplyBot:
             """);
 
             try:
-                # 直接进入指定搜索页面（简化版）
-                target_url = 'https://www.douyin.com/search/三角洲行动?type=video'
-                page_name = '搜索结果页(三角洲行动 视频)'
+                # 直接进入指定搜索页面，关键词后面加随机三位数避免重复
+                random_3digits = random.randint(100, 999)
+                self.search_keyword = f"三角洲行动{random_3digits}"
+                encoded_keyword = self.search_keyword.replace(' ', '%20')
+                target_url = f'https://www.douyin.com/search/{encoded_keyword}?type=video'
+                page_name = f'搜索结果页({self.search_keyword} 视频)'
 
+                print(f"[调试] 搜索关键词: {self.search_keyword}", flush=True)
                 print(f"[调试] 正在加载: {target_url}", flush=True)
                 await page.goto(target_url, timeout=180000, wait_until='domcontentloaded')
                 print("[调试] domcontentloaded完成，等待JS渲染...", flush=True)
-                await asyncio.sleep(25)  # 更长等待让JavaScript渲染完成
+                await asyncio.sleep(10)  # 等待JavaScript渲染完成
                 print(f"[调试] 页面加载完成，当前URL: {page.url}", flush=True)
                 print(f"[调试] 页面标题: {await page.title()}", flush=True)
 
-                # 一次性提取页面上所有视频ID，按顺序逐个处理（不用滚动，不重复）
-                print("[调试] 提取页面上所有视频ID...", flush=True)
-                self.video_ids = await page.evaluate("""
+                # 一次性提取页面上所有视频（ID+标题），按顺序逐个处理（不用滚动，不重复）
+                print("[调试] 提取页面上所有视频（ID+标题）...", flush=True)
+                self.videos = await page.evaluate("""
                     () => {
-                        const videoIds = [];
+                        const result = [];
                         const seen = new Set();
-                        // 收集所有视频链接
-                        const selectors = [
-                            'a[href*="/video/"]',
-                            '[data-e2e="search-card-container"] a',
-                            '[data-e2e="feed-item"] a',
-                            '.search-video-card a',
-                            '.video-card a',
-                            '.card-container a',
-                            '.result-item a'
+                        const banList = ['我的喜欢', '我的收藏', '观看历史', '稍后再看', '精选', '推荐', '搜索', '关注', '朋友', '直播'];
+                        // 收集所有视频卡片
+                        const containers = [
+                            '[data-e2e="search-card-container"]',
+                            '.search-video-card',
+                            '.video-card',
+                            '.card-container',
+                            '.result-item',
+                            '[data-e2e="feed-item"]'
                         ];
-                        for (const selector of selectors) {
-                            const links = document.querySelectorAll(selector);
-                            for (let link of links) {
-                                const href = link.getAttribute('href');
-                                if (href) {
-                                    const match = href.match(/\/video\/([0-9]{10,})/);
-                                    if (match && match[1].length > 5 && !seen.has(match[1])) {
-                                        const rect = link.getBoundingClientRect();
-                                        // 只收集可见的视频卡片
-                                        if (rect.width > 100 && rect.height > 100) {
-                                            videoIds.push(match[1]);
+                        // 先按整个卡片提取
+                        for (const containerSelector of containers) {
+                            const cards = document.querySelectorAll(containerSelector);
+                            for (let card of cards) {
+                                // 找视频链接提取ID
+                                let videoId = null;
+                                const links = card.querySelectorAll('a[href*="/video/"]');
+                                for (let link of links) {
+                                    const href = link.getAttribute('href');
+                                    if (href) {
+                                        const match = href.match(/\/video\/([0-9]{10,})/);
+                                        if (match && match[1].length > 5 && !seen.has(match[1])) {
+                                            videoId = match[1];
                                             seen.add(match[1]);
+                                            break;
+                                        }
+                                    }
+                                }
+                                if (!videoId) continue;
+
+                                // 获取视频标题
+                                let title = '';
+                                const titleSelectors = [
+                                    '[data-e2e="video-title"]',
+                                    '.title',
+                                    '.video-title',
+                                    '.search-card-title',
+                                    '.desc',
+                                    'div[title]'
+                                ];
+                                for (const selector of titleSelectors) {
+                                    const titleEl = card.querySelector(selector);
+                                    if (titleEl) {
+                                        const text = titleEl.textContent.trim();
+                                        if (text.length > 3 && !banList.some(ban => text.includes(ban))) {
+                                            title = text;
+                                            break;
+                                        }
+                                    }
+                                }
+
+                                // 检查卡片可见
+                                const rect = card.getBoundingClientRect();
+                                if (rect.width > 100 && rect.height > 100) {
+                                    result.push({id: videoId, title: title});
+                                }
+                            }
+                        }
+
+                        // 如果没找到，回退到只提取ID
+                        if (result.length === 0) {
+                            const selectors = [
+                                'a[href*="/video/"]'
+                            ];
+                            for (const selector of selectors) {
+                                const links = document.querySelectorAll(selector);
+                                for (let link of links) {
+                                    const href = link.getAttribute('href');
+                                    if (href) {
+                                        const match = href.match(/\/video\/([0-9]{10,})/);
+                                        if (match && match[1].length > 5 && !seen.has(match[1])) {
+                                            const rect = link.getBoundingClientRect();
+                                            if (rect.width > 100 && rect.height > 100) {
+                                                result.push({id: match[1], title: ''});
+                                                seen.add(match[1]);
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
-                        // 如果上面没找到，从HTML提取所有ID
-                        if (videoIds.length === 0) {
-                            const html = document.body.innerHTML;
-                            const regex = /\/video\/([0-9]{10,})/g;
-                            let match;
-                            while ((match = regex.exec(html)) !== null) {
-                                if (!seen.has(match[1])) {
-                                    videoIds.push(match[1]);
-                                    seen.add(match[1]);
-                                }
-                            }
-                        }
-                        return videoIds;
+                        return result;
                     }
                 """);
-                print(f"✅ 提取完成，共找到 {len(self.video_ids)} 个视频，开始按顺序处理", flush=True)
+                print(f"✅ 提取完成，共找到 {len(self.videos)} 个视频，开始按顺序处理", flush=True)
                 print("=" * 60, flush=True)
 
                 # 按顺序逐个处理每个视频
-                while self.current_video_index < len(self.video_ids):
-                    video_id = self.video_ids[self.current_video_index];
-                    print(f"\n📼 处理第 {self.current_video_index + 1}/{len(self.video_ids)} 个视频，ID: {video_id}", flush=True)
+                while self.current_video_index < len(self.videos):
+                    video = self.videos[self.current_video_index];
+                    video_id = video['id'];
+                    video_title_from_search = video['title'];
+                    print(f"\n📼 处理第 {self.current_video_index + 1}/{len(self.videos)} 个视频，ID: {video_id}", flush=True)
+                    if video_title_from_search:
+                        print(f"📹 标题: {video_title_from_search[:60]}{'...' if len(video_title_from_search) > 60 else ''}", flush=True)
 
                     # 风控检查
                     if not self.risk_controller.can_operate():
@@ -145,7 +196,7 @@ class DouyinAutoReplyBot:
                     await asyncio.sleep(8)
 
                     # 处理当前视频
-                    processed = await self._process_current_video(page)
+                    processed = await self._process_current_video(page, video_title_from_search)
 
                     if not processed:
                         print(f"⚠️  视频 {video_id} 处理失败，跳过", flush=True)
@@ -153,11 +204,8 @@ class DouyinAutoReplyBot:
                     # 移动到下一个视频
                     self.current_video_index += 1
 
-                    # 返回搜索页等待下一个
-                    await page.go_back()
-                    await asyncio.sleep(3)
-
-                    # 随机等待
+                    # 不需要返回搜索页，直接导航下一个视频（更流畅，避免标题缓存问题）
+                    # 随机等待后进入下一个
                     wait_time = random.uniform(*self.config['scroll_interval'])
                     await asyncio.sleep(wait_time + 2)
 
@@ -166,7 +214,7 @@ class DouyinAutoReplyBot:
                 print(f"📊 本次运行共回复了{self.reply_count}条评论")
                 await browser.close()
 
-    async def _process_current_video(self, page: Page) -> bool:
+    async def _process_current_video(self, page: Page, video_title_from_search: str) -> bool:
         """处理当前视频，返回是否成功处理"""
         try:
             print(f"\n🎬 正在播放当前视频，停留{self.config['scroll_interval'][0]}~{self.config['scroll_interval'][1]}秒...", flush=True)
@@ -174,20 +222,13 @@ class DouyinAutoReplyBot:
             # 等待视频加载
             await asyncio.sleep(random.uniform(*self.config['scroll_interval']))
 
-            # 获取视频标题，重试几次
-            video_title = ""
-            for retry in range(3):
-                video_title = await self._get_video_title(page)
-                if video_title:
-                    break
-                await page.mouse.wheel(0, 50)
-                await asyncio.sleep(1)
-
-            if not video_title:
-                print("[调试] 未找到视频标题，可能未加载完成，跳过", flush=True)
-                return False
-
-            print(f"📹 当前视频: {video_title[:50]}{'...' if len(video_title) > 50 else ''}", flush=True)
+            # 使用搜索页面一次性提取的标题，如果提取不到标题就用当前搜索关键词
+            if video_title_from_search and len(video_title_from_search.strip()) > 0:
+                video_title = video_title_from_search.strip()
+            else:
+                # 提取失败，直接使用搜索关键词作为标题
+                video_title = self.search_keyword
+            print(f"📹 当前视频标题: {video_title[:60]}{'...' if len(video_title) > 60 else ''}", flush=True)
 
             # 检测并关闭"打开外部链接"弹窗（抖音打开其他链接时会弹出）
             try:
@@ -219,178 +260,9 @@ class DouyinAutoReplyBot:
             except Exception as e:
                 pass
 
-            # 需要点击视频进入详情页才能看到评论
-            # 如果已经在详情页（URL包含/video/），跳过点击直接处理
-            current_url = page.url
-            if '/video/' in current_url:
-                print("[调试] 已在视频详情页，跳过点击", flush=True)
-                click_success = True
-            else:
-                click_success = False
-                page_type = self.config.get('page_type', 'jingxuan')
-                print(f"[调试] 当前页面类型: {page_type}，准备点击进入详情页...", flush=True)
-            try:
-                # 如果是搜索页，直接提取第一个视频ID导航
-                if not click_success and page_type == 'search':
-                    video_id = await page.evaluate("""
-                        () => {
-                            // 方法一：尝试各种选择器
-                            const selectors = [
-                                'a[href*="/video/"]',
-                                '[data-e2e="search-card-container"] a',
-                                '[data-e2e="feed-item"] a',
-                                '.search-video-card a',
-                                '.video-card a',
-                                '.card-container a',
-                                '.result-item a'
-                            ];
-                            for (const selector of selectors) {
-                                const links = document.querySelectorAll(selector);
-                                for (let link of links) {
-                                    const rect = link.getBoundingClientRect();
-                                    // 只找第一个可见的视频链接
-                                    if (rect.top > 10 && rect.top < window.innerHeight - 100
-                                        && rect.width > 100 && rect.height > 100) {
-                                        const href = link.getAttribute('href');
-                                        if (href) {
-                                            // 匹配 /video/1234567890
-                                            const match = href.match(/\/video\/([0-9]+)/);
-                                            if (match && match[1].length > 5) {
-                                                return match[1];
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            // 方法二：终极方案，遍历所有a标签，找第一个可见的/video链接
-                            const allLinks = document.querySelectorAll('a');
-                            for (let link of allLinks) {
-                                const href = link.getAttribute('href');
-                                if (href && href.includes('/video/')) {
-                                    const rect = link.getBoundingClientRect();
-                                    if (rect.top > 10 && rect.top < window.innerHeight - 100
-                                        && rect.width > 100 && rect.height > 100) {
-                                        const match = href.match(/\/video\/([0-9]+)/);
-                                        if (match && match[1].length > 5) {
-                                            return match[1];
-                                        }
-                                    }
-                                }
-                            }
-                            // 方法三：从innerHTML中提取第一个视频ID
-                            const html = document.body.innerHTML;
-                            const match = html.match(/\/video\/([0-9]{10,})/);
-                            if (match && match[1]) {
-                                return match[1];
-                            }
-                            return null;
-                        }
-                    """);
-                    if video_id:
-                        # 直接导航到视频详情页，不依赖点击
-                        video_detail_url = f"https://www.douyin.com/video/{video_id}";
-                        print(f"[调试] 找到视频ID: {video_id}，直接导航到详情页", flush=True);
-                        await page.goto(video_detail_url, wait_until='domcontentloaded', timeout=180000);
-                        await asyncio.sleep(8);
-                        # 多次按x确保评论区打开
-                        for i in range(3):
-                            await page.keyboard.press('x');
-                            await asyncio.sleep(0.5);
-                        await asyncio.sleep(2);
-                        click_success = True;
-
-                # 如果不是搜索页，或者提取ID失败，回退到点击方式
-                if not click_success:
-                    click_success = await page.evaluate("""
-                        () => {
-                            const selectors = [
-                                '[data-e2e="search-card-container"]',
-                                '[data-e2e="feed-item"]',
-                                '.search-video-card',
-                                '.video-card',
-                                '.card-container',
-                                '.result-item'
-                            ];
-                            for (const selector of selectors) {
-                                let cards = document.querySelectorAll(selector);
-                                if (cards.length > 0) {
-                                    for (let card of cards) {
-                                        const rect = card.getBoundingClientRect();
-                                        if (rect.top > 10 && rect.top < window.innerHeight - 100
-                                            && rect.width > 150 && rect.height > 150) {
-                                            card.click();
-                                            return true;
-                                        }
-                                    }
-                                }
-                            }
-                            const title = document.querySelector('.zCT1e3Zf');
-                            if (title) {
-                                let el = title;
-                                for (let i = 0; i < 12; i++) {
-                                    if (!el) break;
-                                    const rect = el.getBoundingClientRect();
-                                    if (rect.width > 100 && rect.height > 50 && rect.top > 0) {
-                                        el.click();
-                                        return true;
-                                    }
-                                    el = el.parentElement;
-                                }
-                            }
-                            const centerX = window.innerWidth / 2;
-                            const centerY = window.innerHeight / 3;
-                            const centerEl = document.elementFromPoint(centerX, centerY);
-                            if (centerEl && typeof centerEl.click === 'function') {
-                                centerEl.click();
-                                return true;
-                            }
-                            return false;
-                        }
-                    """);
-                    await asyncio.sleep(5);
-                    if click_success:
-                        print("[调试] JS点击成功，等待详情页加载");
-                        await asyncio.sleep(3);
-
-                    # If we have modal_id in URL, go directly to video detail page for full comments
-                    from urllib.parse import urlparse, parse_qs
-                    current_url = page.url
-                    parsed_url = urlparse(current_url)
-                    query_params = parse_qs(parsed_url.query)
-                    if 'modal_id' in query_params:
-                        modal_id = query_params['modal_id'][0]
-                        video_detail_url = f"https://www.douyin.com/video/{modal_id}"
-                        print(f"[调试] 直接导航到视频详情页: {video_detail_url}")
-                        await page.goto(video_detail_url, wait_until='domcontentloaded', timeout=120000)
-                        await asyncio.sleep(8)  # Wait for page and comments to load
-                        # Press x to ensure comment sidebar is open
-                        for i in range(2):
-                            await page.keyboard.press('x')
-                            await asyncio.sleep(0.5)
-                        await asyncio.sleep(2)
-                    else:
-                        # Try click comment button on the right
-                        comment_button = None
-                        comment_selectors = ['[data-e2e="comment"]', '.comment-btn', '[title*="评论"]', '.comment-icon']
-                        for sel in comment_selectors:
-                            comment_button = await page.query_selector(sel)
-                            if comment_button:
-                                break
-                        if comment_button:
-                            await comment_button.click()
-                            await asyncio.sleep(1)
-                            print("[调试] Clicked comment button on right sidebar")
-                        else:
-                            # Fallback: press x to open comment sidebar (per user tip)
-                            await page.keyboard.press('x')
-                            await asyncio.sleep(1)
-                            print("[调试] Pressed 'x' to open comment sidebar")
-                else:
-                    if self.debug:
-                        print("[调试] JS点击未能找到可点击容器")
-            except Exception as e:
-                if self.debug:
-                    print(f"[调试] 点击视频出错: {e}")
+            # 已经直接导航到视频详情页，评论区默认已打开
+            # 无需点击视频，无需按x，直接处理评论
+            print("[调试] 已在视频详情页，评论区已打开，直接处理评论", flush=True)
 
             # 检查是否应该回复（按概率）
             if random.random() > self.config['reply_probability']:
@@ -411,12 +283,6 @@ class DouyinAutoReplyBot:
             if not comments:
                 if self.debug:
                     print("[调试] 当前视频没有找到评论，跳过回复", flush=True)
-                # Go back to feed
-                await page.go_back()
-                await asyncio.sleep(2)
-                # Scroll to next video after going back
-                await self._scroll_to_next(page)
-                await asyncio.sleep(random.uniform(*self.config['scroll_interval']) + 2)
                 return True  # 视频处理成功，只是没有评论
 
             print(f"💬 找到 {len(comments)} 条评论，准备回复", flush=True)
@@ -432,12 +298,6 @@ class DouyinAutoReplyBot:
             if self._check_forbidden_keywords(comment_text):
                 if self.debug:
                     print(f"[调试] 评论包含违禁关键词，跳过回复", flush=True)
-                # Go back to feed
-                await page.go_back()
-                await asyncio.sleep(2)
-                # Scroll to next video after going back
-                await self._scroll_to_next(page)
-                await asyncio.sleep(random.uniform(*self.config['scroll_interval']) + 2)
                 return True
 
             # 分析评论
@@ -458,14 +318,7 @@ class DouyinAutoReplyBot:
             else:
                 print(f"⚠️  发送回复失败", flush=True)
 
-            # Go back to feed
-            await page.go_back()
-            await asyncio.sleep(2)
-
-            # Scroll to next video after going back - browser restores scroll position, so need explicit scroll
-            await self._scroll_to_next(page)
-            await asyncio.sleep(random.uniform(*self.config['scroll_interval']) + 2)
-
+            # 不需要返回搜索页，主循环会直接导航下一个视频
             return True
 
         except Exception as e:
@@ -473,26 +326,72 @@ class DouyinAutoReplyBot:
             return False
 
     async def _get_video_title(self, page: Page) -> str:
-        """获取当前视频标题 - 适配抖音网页版最新结构 2025，支持搜索结果页"""
+        """获取当前视频标题 - 适配抖音网页版最新结构 2025，支持搜索结果页和视频详情页"""
         try:
-            # 适配多种页面结构：搜索结果页/推荐页/精选页
+            # 适配多种页面结构：视频详情页/搜索结果页/推荐页/精选页
             result = await page.evaluate("""
                 () => {
-                    // 方法一：原方法找 zCT1e3Zf class（抖音最新标题）
-                    const titles = Array.from(document.querySelectorAll('.zCT1e3Zf'));
-                    const visibleTitles = titles.filter(el => {
-                        const rect = el.getBoundingClientRect();
-                        const text = el.textContent.trim();
-                        const banList = ['我的喜欢', '我的收藏', '观看历史', '稍后再看', '精选', '推荐', '搜索', '关注', '朋友', '直播', '放映厅', '短剧', '下载抖音'];
-                        return rect.top > 10 && rect.top < window.innerHeight - 100
-                            && rect.height > 10
-                            && text.length > 5
-                            && !banList.some(ban => text.includes(ban));
-                    });
-                    if (visibleTitles.length > 0) {
-                        return visibleTitles[0].textContent.trim();
+                    const candidates = [];
+                    const banList = ['我的喜欢', '我的收藏', '观看历史', '稍后再看', '精选', '推荐', '搜索', '关注', '朋友', '直播', '放映厅', '短剧', '下载抖音'];
+                    // *** 优先找视频详情页的标题（我们现在直接导航到详情页）***
+                    const detailSelectors = [
+                        '.video-info .title',
+                        '.video-detail .title',
+                        '[data-e2e="video-title"]',
+                        '.desc',
+                        '.video-desc',
+                        '.zCT1e3Zf',
+                        'h1.title',
+                        '.container h1',
+                        '.content-title'
+                    ];
+                    for (const selector of detailSelectors) {
+                        const elements = document.querySelectorAll(selector);
+                        for (let el of elements) {
+                            const rect = el.getBoundingClientRect();
+                            const text = el.textContent.trim();
+                            // 详情页标题应该在可视区域上半部分
+                            // 排除太短的，作者名一般 < 8个字，视频标题一般更长
+                            // 要求rect.bottom > 0，确保元素在可视区域内 - 过滤SPA滚动出去的旧标题
+                            // 排除display: none，过滤掉已经隐藏的旧标题
+                            if (getComputedStyle(el).display !== 'none'
+                                && rect.top > 10 && rect.top < window.innerHeight * 0.4
+                                && rect.bottom > 0
+                                && rect.height > 10
+                                && rect.width > 100
+                                && text.length > 8
+                                && !banList.some(ban => text.includes(ban))) {
+                                // 保存所有候选
+                                candidates.push({
+                                    text: text,
+                                    top: rect.top,
+                                    len: text.length
+                                });
+                            }
+                        }
                     }
-                    // 方法二：搜索结果页 - 找各种title选择器
+                    // 回退：找所有 zCT1e3Zf
+                    const titles = Array.from(document.querySelectorAll('.zCT1e3Zf'));
+                    for (const title of titles) {
+                        const rect = title.getBoundingClientRect();
+                        const text = title.textContent.trim();
+                        // 排除太短的，作者名一般 < 8个字，视频标题一般更长
+                        // 要求rect.bottom > 0，确保元素在可视区域内 - 过滤SPA滚动出去的旧标题
+                        // 排除display: none，过滤掉已经隐藏的旧标题
+                        if (getComputedStyle(title).display !== 'none'
+                            && rect.top > 10 && rect.top < window.innerHeight * 0.4
+                            && rect.bottom > 0
+                            && rect.height > 10
+                            && text.length > 8
+                            && !banList.some(ban => text.includes(ban))) {
+                            candidates.push({
+                                text: text,
+                                top: rect.top,
+                                len: text.length
+                            });
+                        }
+                    }
+                    // 方法三：搜索结果页 - 找各种title选择器
                     const searchSelectors = [
                         '[data-e2e="video-title"]',
                         '.search-video-card .title',
@@ -507,28 +406,57 @@ class DouyinAutoReplyBot:
                             const rect = el.getBoundingClientRect();
                             const text = el.textContent.trim();
                             const banList = ['我的喜欢', '我的收藏', '观看历史', '稍后再看', '精选', '推荐', '搜索', '关注', '朋友', '直播', '放映厅', '短剧', '下载抖音'];
-                            if (rect.top > 10 && rect.top < window.innerHeight - 100
+                            // 排除太短的，作者名一般 < 8个字，视频标题一般更长
+                            // 要求rect.bottom > 0，确保元素在可视区域内 - 过滤SPA滚动出去的旧标题
+                            if (rect.top > 10 && rect.top < window.innerHeight * 0.4
+                                && rect.bottom > 0
                                 && rect.height > 10
-                                && text.length > 5
+                                && text.length > 8
                                 && !banList.some(ban => text.includes(ban))) {
-                                return text;
+                                candidates.push({
+                                    text: text,
+                                    top: rect.top,
+                                    len: text.length
+                                });
                             }
                         }
                     }
-                    // 方法三：终极方案，遍历所有可见元素找长文本
+                    // 方法四：终极方案，遍历所有可见元素找长文本
                     const allElements = document.querySelectorAll('div, p, span, a');
                     for (let el of allElements) {
                         const rect = el.getBoundingClientRect();
-                        if (rect.top > 10 && rect.top < window.innerHeight - 100
+                        // 排除display: none，过滤掉已经隐藏的旧标题
+                        if (getComputedStyle(el).display !== 'none'
+                            && rect.top > 10 && rect.top < window.innerHeight * 0.4
+                            && rect.bottom > 0
                             && rect.height > 10 && rect.width > 100
                             && el.textContent) {
                             const text = el.textContent.trim();
                             const banList = ['我的喜欢', '我的收藏', '观看历史', '稍后再看', '精选', '推荐', '搜索', '关注', '朋友', '直播', '放映厅', '短剧', '下载抖音'];
                             if (text.length > 10 && text.length < 200
                                 && !banList.some(ban => text.includes(ban))) {
-                                return text;
+                                candidates.push({
+                                    text: text,
+                                    top: rect.top,
+                                    len: text.length
+                                });
                             }
                         }
+                    }
+                    // 如果有候选，排序优先级：
+                    // 1. 更长文本优先（视频标题比作者名长）
+                    // 2. 更靠近页面顶部优先
+                    if (candidates.length > 0) {
+                        candidates.sort((a, b) => {
+                            // 更长的排在前面
+                            if (b.text.length !== a.text.length) {
+                                return b.text.length - a.text.length;
+                            }
+                            // 长度相同，更靠上的排在前面
+                            return a.top - b.top;
+                        });
+                        console.log('Selected title:', candidates[0].text, '(length:', candidates[0].text.length, 'top:', candidates[0].top, ')');
+                        return candidates[0].text;
                     }
                     return null;
                 }
@@ -579,36 +507,9 @@ class DouyinAutoReplyBot:
     async def _get_comments(self, page: Page):
         """获取可见的评论列表 - 适配抖音网页版最新结构 2025"""
         try:
-            # 抖音网页版：评论区按钮在右侧，先尝试滚动到评论按钮再点击打开评论区
-            clicked = await page.evaluate("""
-                () => {
-                    const icons = document.querySelectorAll('[data-e2e="feed-comment-icon"], .feed-comment-icon');
-                    if (icons.length === 0) return false;
-                    // Get the visible icon in current modal
-                    let el = icons[icons.length - 1];
-                    // Traverse up to find the actual clickable container (has tabindex)
-                    for (let i = 0; i < 5; i++) {
-                        if (!el.parentElement) break;
-                        el = el.parentElement;
-                        if (el.hasAttribute('tabindex')) {
-                            break;
-                        }
-                    }
-                    el.scrollIntoView({block: 'center'});
-                    setTimeout(() => el.click(), 200);
-                    return true;
-                }
-            """);
-            if clicked:
-                await asyncio.sleep(3)
-                print("[调试] JS点击了右侧评论图标打开评论区", flush=True)
-
-            # 多次按x快捷键确保打开（抖音网页版快捷键x）
-            for i in range(3):
-                await page.keyboard.press('x')
-                await asyncio.sleep(1)
-            await asyncio.sleep(2)  # Extra wait for drawer to slide in
-            print("[调试] 多次按下x快捷键确保评论区打开", flush=True)
+            # 已经在视频详情页，评论区默认已经打开
+            print("[调试] 视频详情页评论区已打开，直接提取评论", flush=True)
+            await asyncio.sleep(2)
 
             # 抖音网页版评论在右侧侧边栏，需要滚动评论容器才能加载
             # 先找评论容器
@@ -734,16 +635,15 @@ class DouyinAutoReplyBot:
 
             print("[调试] 开始查找回复输入框...", flush=True)
             # 重试几次找输入框
+            found_selector = None
             for retry in range(4):
                 for selector in input_selectors:
                     try:
                         input_box = await page.wait_for_selector(selector, timeout=3000, state="visible")
                         if input_box:
-                            print(f"[调试] 找到输入框，选择器: {selector}", flush=True)
+                            found_selector = selector
                             break
                     except Exception as e:
-                        if self.debug:
-                            print(f"[调试] 选择器{selector}失败: {str(e)[:50]}", flush=True)
                         continue
                 if input_box:
                     break
@@ -763,6 +663,9 @@ class DouyinAutoReplyBot:
                     }
                 """);
                 await asyncio.sleep(2)
+
+            if self.debug and found_selector:
+                print(f"[调试] 找到输入框，选择器: {found_selector}", flush=True)
 
             if not input_box:
                 if self.debug:
@@ -849,51 +752,62 @@ class DouyinAutoReplyBot:
                 if self.debug:
                     print(f"[调试] 获取输入内容失败: {str(e)[:50]}", flush=True)
 
-            # 点击输入框右下角（距离边框15像素处就是发送按钮
-            print("[调试] 输入完成，点击输入框右下角发送...", flush=True)
-            await asyncio.sleep(1)
-            # 确保焦点在输入框
-            await input_box.focus()
-            await input_box.click()
-            await asyncio.sleep(0.3)
-            # 点击输入框右下角，距离右边缘和底部各15像素
+            # 用户调试确认：发送按钮固定坐标 x=1406，y=距离容器底部24像素
+            # 显示点击标记帮助确认
             await input_box.evaluate("""
                 (inputEl) => {
-                    const rect = inputEl.getBoundingClientRect();
-                    // 距离右边缘15px，距离底部15px
-                    const x = rect.right - 15;
-                    const y = rect.bottom - 15;
-                    const elem = document.elementFromPoint(x, y);
-                    if (elem) {
-                        console.log(`Clicking send button at ${x}, ${y}`);
-                        elem.click();
-                        return true;
-                    }
-                    return false;
-                }
-            """);
-            await asyncio.sleep(1);
-            # 万一没点到，fallback 再点一次稍大一点的区域
-            await input_box.evaluate("""
-                (inputEl) => {
-                    const rect = inputEl.getBoundingClientRect();
-                    // 试试更大范围：20-40像素
-                    const positions = [
-                        {x: rect.right - 15, y: rect.bottom - 10},
-                        {x: rect.right - 20, y: rect.bottom - 15},
-                        {x: rect.right - 25, y: rect.bottom - 20},
-                    ];
-                    for (const pos of positions) {
-                        const elem = document.elementFromPoint(pos.x, pos.y);
-                        if (elem) elem.click();
-                    }
-                    return true;
-                }
-            """);
-            await asyncio.sleep(2);
-            send_success = True;
-            print("[调试] ✅ 已点击输入框右下角发送按钮", flush=True);
+                    const FIXED_X = 1406;
+                    const Y_OFFSET_FROM_BOTTOM = 24;
 
+                    let container = inputEl;
+                    for (let i = 0; i < 6 && container; i++) {
+                        if (container.className.includes('comment-input')) {
+                            break;
+                        }
+                        container = container.parentElement;
+                    }
+                    const rect = (container || inputEl).getBoundingClientRect();
+                    const actualY = rect.bottom - Y_OFFSET_FROM_BOTTOM;
+
+                    // 在点击位置显示红色视觉标记，方便确认位置
+                    const marker = document.createElement('div');
+                    marker.style.position = 'fixed';
+                    marker.style.left = FIXED_X + 'px';
+                    marker.style.top = actualY + 'px';
+                    marker.style.width = '20px';
+                    marker.style.height = '20px';
+                    marker.style.marginLeft = '-10px';
+                    marker.style.marginTop = '-10px';
+                    marker.style.background = 'rgba(255, 0, 0, 0.6)';
+                    marker.style.border = '2px solid white';
+                    marker.style.borderRadius = '50%';
+                    marker.style.zIndex = '999999';
+                    marker.style.pointerEvents = 'none';
+                    document.body.appendChild(marker);
+                    // 3秒后消失
+                    setTimeout(() => marker.remove(), 3000);
+
+                    // 点击这个位置
+                    const elem = document.elementFromPoint(FIXED_X, actualY);
+                    if (elem) {
+                        try {
+                            const event = new MouseEvent('click', {
+                                bubbles: true,
+                                cancelable: true,
+                                view: window
+                            });
+                            elem.dispatchEvent(event);
+                            if (typeof elem.click === 'function') {
+                                elem.click();
+                            }
+                            console.log(`Clicked send button at fixed position x=${FIXED_X}, y=${actualY}, tag=${elem.tagName}`);
+                        } catch (e) {
+                            console.error('Click failed:', e);
+                        }
+                    }
+                }
+            """);
+            print("[调试] ✅ 已点击固定发送按钮位置: x=1406, y=距离底部24px", flush=True);
             # 等待发送完成
             await asyncio.sleep(random.uniform(1.5, 2.5))
 
@@ -904,9 +818,19 @@ class DouyinAutoReplyBot:
                 still_visible = await input_box.is_visible()
                 final_send_success = False
 
-                # Check for "发送成功" toast notification
-                success_elem = await page.query_selector('[role="status"]:has-text("发送成功"), text="发送成功"');
-                if success_elem and await success_elem.is_visible():
+                # Check for "发送成功" toast notification - use JS to find since :has-text is not native
+                has_success_toast = await page.evaluate("""
+                    () => {
+                        const elems = document.querySelectorAll('[role="status"], [class*="toast"], .toast');
+                        for (const el of elems) {
+                            if (el.textContent.includes('发送成功')) {
+                                return true;
+                            }
+                        }
+                        return false;
+                    }
+                """);
+                if has_success_toast:
                     print("✅ 检测到抖音发送成功提示", flush=True)
                     final_send_success = True
                 else:
@@ -968,8 +892,11 @@ def main():
     import argparse
     parser = argparse.ArgumentParser(description="抖音自动刷视频+评论回复机器人")
     parser.add_argument("--config", default="../config/config.yaml", help="配置文件路径")
-    parser.add_argument("--debug", action="store_true", help="调试模式（显示浏览器窗口）")
+    parser.add_argument("--no-debug", dest="debug", action="store_false", help="关闭调试模式")
     args = parser.parse_args()
+    # 默认开启调试（输出DOM结构、截图）
+    if not hasattr(args, 'debug'):
+        args.debug = True
 
     try:
         bot = DouyinAutoReplyBot(args.config, args.debug)
