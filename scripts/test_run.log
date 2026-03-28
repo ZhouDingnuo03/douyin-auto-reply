@@ -1,0 +1,11 @@
+(node:194307) [DEP0169] DeprecationWarning: `url.parse()` behavior is not standardized and prone to errors that have security implications. Use the WHATWG URL API instead. CVEs are not issued for `url.parse()` vulnerabilities.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+🚀 抖音自动回复机器人启动
+📝 配置：回复模式=ai, 每小时最大回复=50
+============================================================
+❌ 启动失败: BrowserType.connect_over_cdp: Timeout 180000ms exceeded.
+Call log:
+  - <ws preparing> retrieving websocket url from http://127.0.0.1:9222
+  - <ws connecting> ws://127.0.0.1:9222/devtools/browser/5f00c20e-45d5-45f9-af3e-efa9abf46752
+  - <ws connected> ws://127.0.0.1:9222/devtools/browser/5f00c20e-45d5-45f9-af3e-efa9abf46752
+

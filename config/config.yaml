@@ -1,0 +1,46 @@
+# 基础配置
+scroll_interval: [2, 4]  # 每个视频停留时间范围（秒）- 测试调短
+reply_probability: 1.0  # 回复概率（0-1，100%概率回复，方便测试）
+max_replies_per_hour: 50  # 每小时最大回复数，测试时调大
+min_reply_interval: 5  # 两次回复最小间隔（秒）- 测试调短
+
+# 页面配置：刷哪个页面的视频
+# page_type可选值:
+#   - "jingxuan" : 精选页（默认）
+#   - "recommend" : 推荐页
+#   - "follow"    : 关注页
+#   - "search"    : 搜索结果页（需要填写search_keyword）
+page_type: "search"
+search_keyword: "三角洲行动"  # page_type=search时填写要搜索的关键词
+
+# 回复模式："template"（模板话术）或 "ai"（AI生成）
+reply_mode: "ai"
+
+# 模板话术配置（reply_mode=template时使用）
+reply_templates:
+  感谢类: ["谢谢支持~", "感谢喜欢💕", "谢谢认可😊"]
+  互动类: ["你说得对👍", "太有道理了！", "完全同意~"]
+  提问类: ["这个问题很好哦~", "你怎么看呀？", "欢迎讨论~"]
+  通用类: ["哈哈太有意思了😂", "666", "不错不错~"]
+
+# AI回复配置（reply_mode=ai时使用）
+ai_config:
+  api_key: "cac2c4f4-1a83-45d1-8eab-2e3b3738f141"  # 火山方舟API Key
+  base_url: "https://ark.cn-beijing.volces.com/api/v3/responses"
+  model: "deepseek-v3-2-251201"
+  prompt: "你是抖音评论区的友好用户，针对视频内容和用户评论，生成一条自然、口语化、符合抖音风格的回复，不超过20字。"
+  max_length: 20  # 回复最大长度
+  enable_web_search: false  # 是否开启联网搜索
+
+# 关键词过滤配置
+keyword_filter:
+  enabled: true
+  forbidden_keywords: []  # 包含这些关键词的评论不回复
+  skip_keywords: ["广告", "互粉", "加v"]  # 包含这些关键词的视频跳过
+
+# 风控配置
+risk_control:
+  random_wait: true  # 随机等待
+  human_like_scroll: true  # 模拟人类滚动行为
+  avoid_repeat_reply: true  # 避免重复回复同一用户
+  auto_sleep: ["22:00", "08:00"]  # 夜间自动休眠时间段
