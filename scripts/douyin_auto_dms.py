@@ -78,7 +78,7 @@ class DouyinAutoDmsBot:
                 }, true);
             """);
 
-            try {
+            try:
                 while True:
                     # 风控检查
                     if not self.risk_controller.can_operate():
@@ -92,14 +92,14 @@ class DouyinAutoDmsBot:
                     print(f"\n⏳ 等待 {self.check_interval} 秒后检查下一批私信...", flush=True)
                     await asyncio.sleep(self.check_interval)
 
-            } except KeyboardInterrupt:
+            except KeyboardInterrupt:
                 print("\n🛑 机器人停止运行", flush=True)
                 print(f"📊 本次运行共检查 {self.dms_processed} 条私信，回复 {self.dms_replied} 条", flush=True)
                 await browser.close()
 
     async def _check_and_reply_dms(self, page: Page):
         """检查并回复新私信，使用用户指定坐标"""
-        try {
+        try:
             # 点击私信按钮打开私信列表 (1800, 15)
             print(f"\n📥 检查新私信...", flush=True)
             x, y = self.COORDINATES['dms_button']
@@ -291,7 +291,7 @@ class DouyinAutoDmsBot:
             await asyncio.sleep(random.uniform(3, 6))
             return True
 
-        } catch Exception e:
+        except Exception as e:
             print(f"❌ 检查私信出错: {str(e)[:100]}", flush=True)
             return False
 
@@ -303,10 +303,10 @@ def main():
     parser.add_argument("--no-debug", dest="debug", action="store_false", help="关闭调试模式")
     args = parser.parse_args()
 
-    try {
+    try:
         bot = DouyinAutoDmsBot(args.config, args.debug)
         asyncio.run(bot.run())
-    } catch Exception e:
+    except Exception as e:
         print(f"❌ 启动失败: {e}")
         exit(1)
 
