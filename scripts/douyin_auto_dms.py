@@ -210,6 +210,10 @@ class DouyinAutoDmsBot:
                 chat_context += f"{sender}: {msg['text']}\n"
 
             print(f"💬 共获取 {len(chat_history)} 条消息，最后一条对方消息: {last_message[:60]}{'...' if len(last_message) > 60 else ''}", flush=True)
+            print("📜 完整聊天记录:", flush=True)
+            for msg in chat_history:
+                sender = "我" if msg['is_self'] else "对方"
+                print(f"  [{sender}] {msg['text'][:80]}{'...' if len(msg['text']) > 80 else ''}", flush=True)
 
             # 风控：违禁词检查最后一条消息
             if self.risk_controller._check_forbidden_keywords(last_message):
