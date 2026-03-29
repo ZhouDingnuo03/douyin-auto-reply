@@ -63,11 +63,18 @@ class ReplyGenerator:
 我的背景信息：
 {self.background_info}
 
-回复意图：
+回复要求：
 {self.reply_intention}
 
-当前视频：{video_title}
-用户评论：{comment_text}
+重要提示：
+- 请根据聊天上下文自然回复对方的消息，只回复一次即可
+- 你知道我的租号需求，但这**不需要每条回复都主动提起**
+- 只有当对方问到租号、收号、打游戏相关问题时，你再说明我的需求
+- 正常聊天交流即可，保持自然，不要重复输出背景信息
+- 直接给出你的回复，不要额外说明
+
+{video_title}
+用户最新消息：{comment_text}
 
 请直接给出回复："""
             
@@ -106,7 +113,10 @@ class ReplyGenerator:
             if result.get('choices') and len(result['choices']) > 0:
                 reply = result['choices'][0]['message']['content'].strip()
             else:
-                reply = result.get('content', '')
+                reply = result.get('content', '').strip()
+
+            # 去掉所有换行和空格，变成连续字符串
+            reply = reply.replace('\n', '').replace('\r', '').replace(' ', '').strip()
 
             # 确保回复长度合适
             if len(reply) > self.max_length:

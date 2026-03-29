@@ -42,7 +42,7 @@ keyword_filter:
 
 # 私信自动回复配置
 # 如果你只需要自动回复评论，可以不用改这里
-dms_check_interval: 60  # 检查新私信间隔（秒）
+dms_check_interval: 3  # 检查新私信间隔（秒）
 dms_max_replies_per_hour: 20  # 每小时最多回复多少条私信
 
 # 风控配置
