@@ -341,18 +341,35 @@ class DouyinAutoDmsBot:
                 except Exception as e:
                     print(f"⚠️  加载本地回复文件失败: {e}", flush=True)
 
-            # 检查匹配：最新消息在顶部，提取开头 (回复长度 + 16) 字符，包含说明已经回复过
+            # 检查匹配：最新消息在顶部，提取开头 (回复长度 + 随机偏移) 字符，包含说明已经回复过
+            # 偏移量从 1-16 线性概率: 1概率最小 ~1% (权重1), 16概率最大 ~50% (权重50)
             found_match = False
+            # 构建权重表 (1-16)
+            import random
+            weights = []
+            for offset in range(1, 17):
+                weight = 1 + (49 / 15) * (offset - 1)
+                weights.append(weight)
+            total_weight = sum(weights)
             # 检查内存中历史 + 本地加载的
             all_replied = self.replied_history + loaded_replied
             for replied in all_replied:
                 replied_stripped = replied.strip()
                 if len(replied_stripped) > 0:
-                    # 取开头 回复长度 + 16 字符检查
-                    check_length = len(replied_stripped) + 16
+                    # 加权随机选择偏移量
+                    r = random.uniform(0, total_weight)
+                    cumulative = 0
+                    extra_offset = 16  # 默认
+                    for i, w in enumerate(weights):
+                        cumulative += w
+                        if r <= cumulative:
+                            extra_offset = i + 1
+                            break
+                    # 取开头 回复长度 + 随机偏移 字符检查
+                    check_length = len(replied_stripped) + extra_offset
                     start_part = full_chat_text.strip()[:check_length]
                     if replied_stripped in start_part:
-                        print(f"✅ 匹配成功: 开头 {check_length} 字符包含已回复内容 '{replied_stripped}'，本轮跳过", flush=True)
+                        print(f"✅ 匹配成功: 开头 {check_length} 字符 (偏移{extra_offset})包含已回复内容 '{replied_stripped}'，本轮跳过", flush=True)
                         found_match = True
                         break
 
