@@ -10,13 +10,15 @@ class ReplyGenerator:
         self.config = config
         self.reply_mode = config.get('reply_mode', 'template')
         self.templates = config.get('reply_templates', {})
-        
+
         if self.reply_mode == 'ai':
             ai_config = config.get('ai_config', {})
             self.api_key = ai_config.get('api_key', '')
             self.base_url = ai_config.get('base_url', 'https://ark.cn-beijing.volces.com/api/v3/responses')
             self.ai_model = ai_config.get('model', 'deepseek-v3-2-251201')
             self.ai_prompt = ai_config.get('prompt', '生成抖音风格的短回复，不超过20字。')
+            self.background_info = ai_config.get('background_info', '')
+            self.reply_intention = ai_config.get('reply_intention', '友善互动，给视频评论区增加活跃气氛')
             self.max_length = ai_config.get('max_length', 20)
             self.enable_web_search = ai_config.get('enable_web_search', False)
 
@@ -56,7 +58,18 @@ class ReplyGenerator:
                 "Content-Type": "application/json"
             }
             
-            prompt = f"{self.ai_prompt}\n视频内容：{video_title}\n用户评论：{comment_text}\n回复："
+            prompt = f"""{self.ai_prompt}
+
+我的背景信息：
+{self.background_info}
+
+回复意图：
+{self.reply_intention}
+
+当前视频：{video_title}
+用户评论：{comment_text}
+
+请直接给出回复："""
             
             # OpenAI兼容格式
             payload = {

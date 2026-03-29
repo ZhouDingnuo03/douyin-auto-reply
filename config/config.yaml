@@ -29,6 +29,8 @@ ai_config:
   base_url: "https://ark.cn-beijing.volces.com/api/v3/responses"
   model: "deepseek-v3-2-251201"
   prompt: "你是抖音评论区的友好用户，针对视频内容和用户评论，生成一条自然、口语化、符合抖音风格的回复，不超过20字。"
+  background_info: "我想租用别人的三角洲行动账号，收号比例在1：35到1：40之间"
+  reply_intention: "在评论区自然表达我的收号需求，回复他人评论时自然带出"
   max_length: 20  # 回复最大长度
   enable_web_search: false  # 是否开启联网搜索
 
