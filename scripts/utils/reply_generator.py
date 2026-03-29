@@ -118,34 +118,12 @@ class ReplyGenerator:
             # 去掉所有换行和空格，变成连续字符串
             reply = reply.replace('\n', '').replace('\r', '').replace(' ', '').strip()
 
-            # 随机选择回复长度：1-16字符线性概率分布
-            # 长度1概率最小 ~1%，长度16概率最大 ~50%
-            # 权重线性递增: weight[0] = 1, weight[15] = 50
-            if len(reply) > 0:
-                import random
-                # 构建权重
-                weights = []
-                for length in range(1, 17):  # 1 到 16
-                    # 线性从 1 到 50
-                    weight = 1 + (49 / 15) * (length - 1)
-                    weights.append(weight)
-                # 加权随机选择实际截断长度
-                total = sum(weights)
-                r = random.uniform(0, total)
-                cumulative = 0
-                selected_length = len(reply)
-                for i, w in enumerate(weights):
-                    cumulative += w
-                    if r <= cumulative:
-                        selected_length = min(i + 1, len(reply))
-                        break
-                # 截断到选中长度
-                reply = reply[:selected_length]
-                if len(reply) == 0:
-                    reply = reply[:1]  # 至少保留1个字符
+            # 确保回复长度不超过最大限制
+            if len(reply) > self.max_length:
+                reply = reply[:self.max_length] + "..."
 
             if reply:
-                print(f"✅ AI成功生成回复: {reply} (随机长度: {len(reply)})")
+                print(f"✅ AI成功生成回复: {reply}")
             return reply if reply else self._generate_template_reply(comment_text)
             
         except Exception as e:
