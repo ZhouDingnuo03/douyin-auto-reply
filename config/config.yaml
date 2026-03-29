@@ -40,6 +40,11 @@ keyword_filter:
   forbidden_keywords: []  # 包含这些关键词的评论不回复
   skip_keywords: ["广告", "互粉", "加v"]  # 包含这些关键词的视频跳过
 
+# 私信自动回复配置
+# 如果你只需要自动回复评论，可以不用改这里
+dms_check_interval: 60  # 检查新私信间隔（秒）
+dms_max_replies_per_hour: 20  # 每小时最多回复多少条私信
+
 # 风控配置
 risk_control:
   random_wait: true  # 随机等待
