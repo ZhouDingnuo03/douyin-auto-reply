@@ -152,48 +152,72 @@ class DouyinAutoDmsBot:
             await asyncio.sleep(5)  # 等待会话内容加载
             print("✅ 已打开私信会话", flush=True);
 
-            # 获取最后一条用户消息
-            last_message = await page.evaluate("""
+            # 获取完整聊天记录
+            chat_history = await page.evaluate("""
                 () => {
-                    // 在 content 区域找最后一条不是自己发的消息
-                    const container = document.querySelector('.messageMessageBox messageBox messageBoxlargMaring, .MessageBoxContentrowBox, [class*="messageBox"]');
+                    // 在 content 区域找消息容器
+                    const container = document.querySelector('.messageMessageBox messageBox messageBoxlargMaring, .MessageBoxContentrowBox, [class*="messageBox"], [class*="messageList"], .components-message-list');
                     if (!container) return null;
 
                     const messages = container.querySelectorAll('[class*=" message"], [class*=" Message"], div[role="listitem"]');
                     if (messages.length === 0) return null;
 
-                    // 从后往前找，找不是自己发的
-                    for (let i = messages.length - 1; i >= 0; i--) {
+                    const result = [];
+                    // 收集最近10条消息作为上下文
+                    for (let i = Math.max(0, messages.length - 10); i < messages.length; i++) {
                         const msg = messages[i];
                         // 如果包含 "claude-highlight" 跳过我们自己的高亮
                         if (msg.id === 'claude-highlight') continue;
-                        // 判断是不是自己发的：有 self 类就是我发的
-                        if (msg.classList.contains('self') || msg.classList.contains('is-me')) continue;
+
+                        // 判断是不是自己发的
+                        const is_self = msg.classList.contains('self') || msg.classList.contains('is-me');
 
                         // 提取文字
                         let textEl = msg.querySelector('[class*="content"], [class*="text"], div[role="presentation"]');
                         if (!textEl) textEl = msg;
                         const text = textEl.textContent.trim();
-                        if (text.length > 0) return text;
+                        if (text.length > 0) {
+                            result.push({
+                                is_self: is_self,
+                                text: text
+                            });
+                        }
                     }
 
-                    return null;
+                    return result.length > 0 ? result : null;
                 }
             """);
 
-            if not last_message or len(last_message.strip()) == 0:
-                print("❌ 没找到对方消息，跳过", flush=True)
+            if not chat_history or len(chat_history) == 0:
+                print("❌ 没找到任何消息，跳过", flush=True)
                 return False
 
-            print(f"💬 对方消息: {last_message[:60]}{'...' if len(last_message) > 60 else ''}", flush=True)
+            # 找最后一条对方消息
+            last_message = None
+            for msg in reversed(chat_history):
+                if not msg['is_self']:
+                    last_message = msg['text']
+                    break
 
-            # 风控：违禁词检查
+            if not last_message:
+                print("❌ 没找到对方新消息，跳过", flush=True)
+                return False
+
+            # 格式化聊天记录
+            chat_context = "\n聊天历史记录：\n"
+            for msg in chat_history:
+                sender = "我" if msg['is_self'] else "对方"
+                chat_context += f"{sender}: {msg['text']}\n"
+
+            print(f"💬 共获取 {len(chat_history)} 条消息，最后一条对方消息: {last_message[:60]}{'...' if len(last_message) > 60 else ''}", flush=True)
+
+            # 风控：违禁词检查最后一条消息
             if self.risk_controller._check_forbidden_keywords(last_message):
                 print("⚠️  消息包含违禁关键词，跳过回复", flush=True)
                 return False
 
-            # AI生成回复，复用现有逻辑，视频标题为空（私信）
-            reply_text = generate_reply(last_message, "", self.config)
+            # AI生成回复，复用现有逻辑，将聊天记录作为视频标题传入提供上下文
+            reply_text = generate_reply(last_message, chat_context, self.config)
             print(f"🤖 AI生成回复: {reply_text}", flush=True)
 
             # 点击输入框 (1500, 700)
