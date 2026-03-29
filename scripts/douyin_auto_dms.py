@@ -109,12 +109,40 @@ class DouyinAutoDmsBot:
                 print(f"📊 本次运行共检查 {self.dms_processed} 条私信，回复 {self.dms_replied} 条", flush=True)
                 await browser.close()
 
+    async def _highlight_position(self, page: Page, x: int, y: int, name: str):
+        """高亮显示点击位置（可视化）"""
+        await page.evaluate(f"""
+            () => {{
+                // 移除旧高亮
+                const oldHighlight = document.getElementById('auto-click-highlight');
+                if (oldHighlight) oldHighlight.remove();
+
+                // 添加新高亮
+                const highlight = document.createElement('div');
+                highlight.id = 'auto-click-highlight';
+                highlight.style.position = 'fixed';
+                highlight.style.left = ({x} - 20) + 'px';
+                highlight.style.top = ({y} - 20) + 'px';
+                highlight.style.width = '40px';
+                highlight.style.height = '40px';
+                highlight.style.border = '3px solid #ff0000';
+                highlight.style.background = 'rgba(255, 0, 0, 0.3)';
+                highlight.style.borderRadius = '50%';
+                highlight.style.zIndex = '100000';
+                highlight.style.pointerEvents = 'none';
+                highlight.title = '{name} at ({x}, {y})';
+                document.body.appendChild(highlight);
+            }}
+        """);
+        await asyncio.sleep(0.5)
+
     async def _check_and_reply_dms(self, page: Page):
         """检查并回复新私信，使用用户指定坐标"""
         try:
             # 点击私信按钮打开私信列表 (1800, 15)
             print(f"\n📥 检查新私信...", flush=True)
             x, y = self.COORDINATES['dms_button']
+            await self._highlight_position(page, x, y, "私信按钮");
             await page.evaluate(f"""
                 () => {{
                     const elem = document.elementFromPoint({x}, {y});
@@ -138,6 +166,7 @@ class DouyinAutoDmsBot:
 
             # 点击第一个会话 (1800, 200)
             x, y = self.COORDINATES['conversation']
+            await self._highlight_position(page, x, y, "会话");
             clicked = await page.evaluate(f"""
                 () => {{
                     const elem = document.elementFromPoint({x}, {y});
@@ -238,6 +267,7 @@ class DouyinAutoDmsBot:
 
             # 点击输入框 (1500, 700)
             x, y = self.COORDINATES['input_box'];
+            await self._highlight_position(page, x, y, "输入框");
             found = await page.evaluate(f"""
                 () => {{
                     const elem = document.elementFromPoint({x}, {y});
@@ -280,6 +310,7 @@ class DouyinAutoDmsBot:
 
             # 点击发送按钮 (1850, 710)
             x, y = self.COORDINATES['send_button'];
+            await self._highlight_position(page, x, y, "发送按钮");
             sent = await page.evaluate(f"""
                 () => {{
                     const elem = document.elementFromPoint({x}, {y});
