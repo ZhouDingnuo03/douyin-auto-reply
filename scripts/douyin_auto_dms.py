@@ -62,7 +62,19 @@ class DouyinAutoDmsBot:
                 context = browser.contexts[0]
             else:
                 context = await browser.new_context()
-            page = await context.new_page()
+
+            # 先找已有的抖音页面
+            page = None
+            for pg in context.pages:
+                if 'douyin.com' in pg.url:
+                    page = pg
+                    print(f"[调试] ✅ 找到已有抖音页面: {page.url}", flush=True)
+                    break
+            if not page:
+                print("[调试] 创建新页面并导航到抖音主页...", flush=True)
+                page = await context.new_page()
+                await page.goto('https://www.douyin.com/', timeout=60000, wait_until='domcontentloaded')
+                await asyncio.sleep(3)
 
             # 拦截弹窗
             await page.add_init_script("""
