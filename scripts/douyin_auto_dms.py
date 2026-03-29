@@ -133,7 +133,7 @@ class DouyinAutoDmsBot:
                     return true;
                 }}
             """);
-            await asyncio.sleep(5)  # 等待列表加载
+            await asyncio.sleep(2)  # 等待列表加载
             print("✅ 已点击私信按钮，私信列表打开", flush=True);
 
             # 点击第一个会话 (1800, 200)
@@ -161,7 +161,7 @@ class DouyinAutoDmsBot:
                 print("⚠️  点击会话失败", flush=True)
                 return False
 
-            await asyncio.sleep(5)  # 等待会话内容加载
+            await asyncio.sleep(2)  # 等待会话内容加载
             print("✅ 已打开私信会话", flush=True);
 
             # 获取完整聊天记录
