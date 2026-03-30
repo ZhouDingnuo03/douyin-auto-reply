@@ -65,6 +65,102 @@ class DouyinAutoReplyBot:
                 }, true);
             """);
 
+            # 合并后台监控任务：每1秒检查一次，清理页面+杀掉多余进程
+            async def background_cleanup():
+                import os
+                import signal
+                import requests
+                print("🚀 后台监控已启动，每秒检查一次 [页面清理 + 进程清理]", flush=True)
+                while True:
+                    # === 1. 页面清理：只保留一个抖音页面 ===
+                    closed_count = 0
+                    total_pages = 0
+                    douyin_pages = 0
+                    try:
+                        resp = requests.get('http://127.0.0.1:9222/json', timeout=5)
+                        targets = resp.json()
+                        # 找出所有抖音页面
+                        douyin_targets = []
+                        other_targets = []
+                        for target in targets:
+                            if target['type'] != 'page':
+                                continue
+                            total_pages += 1
+                            if 'douyin.com' in target['url']:
+                                douyin_pages += 1
+                                douyin_targets.append(target)
+                            else:
+                                other_targets.append(target)
+                        # 关闭所有非抖音
+                        for target in other_targets:
+                            requests.get(f'http://127.0.0.1:9222/json/close/{target["id"]}', timeout=2)
+                            closed_count += 1
+                        # 如果有多个抖音页面，只保留第一个，关闭其他
+                        if len(douyin_targets) > 1:
+                            for target in douyin_targets[1:]:
+                                requests.get(f'http://127.0.0.1:9222/json/close/{target["id"]}', timeout=2)
+                                closed_count += 1
+                    except Exception as e:
+                        pass
+                    # === 2. 进程清理：只保留9222端口的主进程 ===
+                    total_main = 0
+                    kept = 0
+                    killed_count = 0
+                    try:
+                        # Get all PIDs of chrome and chromium - use two separate pgrep to avoid regex issues
+                        pids = []
+                        with os.popen('pgrep -f chrome 2>/dev/null') as f:
+                            output = f.read().strip()
+                            if output:
+                                pids.extend([int(p) for p in output.split()])
+                        with os.popen('pgrep -f chromium 2>/dev/null') as f:
+                            output = f.read().strip()
+                            if output:
+                                pids.extend([int(p) for p in output.split()])
+                        # Remove duplicates
+                        pids = list(set(pids))
+                        # Check each process
+                        for pid in pids:
+                            if pid == os.getpid():
+                                continue
+                            # Read command line
+                            try:
+                                with open(f'/proc/{pid}/cmdline', 'rb') as f:
+                                    cmd = f.read().decode(errors='ignore').replace('\x00', ' ')
+                            except:
+                                continue
+                            # Only keep the main browser process that has remote-debugging-port=9222
+                            if 'type=' not in cmd and ('chromium' in cmd or 'chrome' in cmd):
+                                total_main += 1
+                                if 'remote-debugging-port=9222' not in cmd:
+                                    # Extra main browser process, kill immediately
+                                    try:
+                                        os.kill(pid, signal.SIGKILL)
+                                        killed_count += 1
+                                    except:
+                                        pass
+                                else:
+                                    kept += 1
+                    except Exception as e:
+                        pass
+                    # === 输出日志 ===
+                    # 只有当有关闭操作才输出，减少噪音
+                    if closed_count > 0 or killed_count > 0:
+                        print(f"🧹 [后台] 页面: {total_pages} 页 → 关闭 {closed_count}，保留 {douyin_pages} 个抖音 | 进程: {total_main} 个 → 杀掉 {killed_count}，保留 {kept} 个", flush=True)
+                    # 重新找抖音页面确保主流程有可用页面
+                    found = False
+                    for ctx in browser.contexts:
+                        for pg in ctx.pages:
+                            if 'douyin.com' in pg.url:
+                                page = pg
+                                found = True
+                                break
+                        if found:
+                            break
+                    await asyncio.sleep(1)
+
+            cleanup_task = asyncio.create_task(background_cleanup())
+
             try:
                 # 直接进入指定搜索页面，关键词后面加随机三位数避免重复
                 random_3digits = random.randint(100, 999)
